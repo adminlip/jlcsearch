@@ -64,17 +64,35 @@ export class CacheService {
   }
 
   /**
+   * Deletes a cached response if it exists.
+   */
+  async delete(url: URL): Promise<void> {
+    const key = await generateCacheKey(url)
+    await this.kv.delete(key)
+  }
+
+  /**
    * Builds a Response from a cache entry with appropriate headers.
    */
   buildResponse(
     entry: CacheEntry,
-    cacheStatus: "HIT" | "MISS" | "STALE",
+    cacheStatus: "HIT" | "MISS" | "STALE" | "BUST",
     origin: string | null,
+    options: {
+      noStore?: boolean
+      cacheBust?: boolean
+    } = {},
   ): Response {
     const headers = new Headers(entry.metadata.headers)
-    headers.set("cache-control", CACHE_CONTROL_HEADER_VALUE)
+    headers.set(
+      "cache-control",
+      options.noStore ? "no-store" : CACHE_CONTROL_HEADER_VALUE,
+    )
     headers.set("x-cache", cacheStatus)
     headers.set("x-cached-at", entry.metadata.cachedAt)
+    if (options.cacheBust) {
+      headers.set("x-cache-bust", "1")
+    }
     addCorsHeaders(headers, origin)
 
     return new Response(entry.body, {

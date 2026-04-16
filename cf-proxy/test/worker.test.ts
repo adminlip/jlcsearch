@@ -229,6 +229,35 @@ describe("Worker integration", () => {
     expect(await response.text()).toBe(testBody)
   })
 
+  it("evicts and refreshes the canonical cache entry when cachebust=1 is present", async () => {
+    env.USE_D1 = "true"
+
+    const url = new URL("https://example.com/")
+    const cacheKey = await generateCacheKey(url)
+    const staleBody = "<html><body>stale home page</body></html>"
+
+    await env.CACHE_KV.put(cacheKey, staleBody, {
+      metadata: {
+        cachedAt: new Date().toISOString(),
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      },
+    })
+
+    const bustedResponse = await SELF.fetch("https://example.com/?cachebust=1")
+    const bustedBody = await bustedResponse.text()
+
+    expect(bustedResponse.headers.get("x-cache")).toBe("BUST")
+    expect(bustedResponse.headers.get("x-cache-bust")).toBe("1")
+    expect(bustedResponse.headers.get("cache-control")).toBe("no-store")
+    expect(bustedBody).not.toContain(staleBody)
+    expect(bustedBody).toContain("JLCPCB In-Stock Parts Engine")
+
+    const cachedResponse = await SELF.fetch("https://example.com/")
+    expect(cachedResponse.headers.get("x-cache")).toBe("HIT")
+    expect(await cachedResponse.text()).toBe(bustedBody)
+  })
+
   it("handles different cache key for different query params", async () => {
     env.USE_D1 = "true"
 

@@ -37,6 +37,11 @@ describe("normalizeUrl", () => {
     const url2 = new URL("https://other.com/path?a=1")
     expect(normalizeUrl(url1)).toBe(normalizeUrl(url2))
   })
+
+  it("ignores cachebust query parameters", () => {
+    const url = new URL("https://example.com/path?a=1&cachebust=1&b=2")
+    expect(normalizeUrl(url)).toBe("/path?a=1&b=2")
+  })
 })
 
 describe("generateCacheKey", () => {
@@ -66,6 +71,14 @@ describe("generateCacheKey", () => {
   it("generates same hash regardless of origin", async () => {
     const url1 = new URL("https://example.com/path")
     const url2 = new URL("https://other.com/path")
+    const key1 = await generateCacheKey(url1)
+    const key2 = await generateCacheKey(url2)
+    expect(key1).toBe(key2)
+  })
+
+  it("generates the same hash when cachebust is present", async () => {
+    const url1 = new URL("https://example.com/path?a=1&b=2")
+    const url2 = new URL("https://example.com/path?b=2&a=1&cachebust=1")
     const key1 = await generateCacheKey(url1)
     const key2 = await generateCacheKey(url2)
     expect(key1).toBe(key2)

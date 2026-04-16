@@ -53,7 +53,8 @@ export const headerTableSpec: DerivedTableSpec<Header> = {
     db
       .selectFrom("components")
       .innerJoin("categories", "components.category_id", "categories.id")
-      .selectAll()
+      .selectAll("components")
+      .select(["categories.subcategory as source_subcategory"])
       .where((wb) =>
         wb.or([
           wb("categories.subcategory", "=", "Female Headers"),
@@ -67,7 +68,13 @@ export const headerTableSpec: DerivedTableSpec<Header> = {
       if (!extra.attributes) return null
 
       const attrs = extra.attributes
-      const desc = c.description.toLowerCase()
+      const sourceSubcategory =
+        (c as typeof c & { source_subcategory?: string | null })
+          .source_subcategory ?? ""
+      const searchableText = [c.description, c.mfr, extra.title]
+        .filter((value): value is string => typeof value === "string")
+        .join(" ")
+        .toLowerCase()
 
       // Parse pitch
       let pitch = null
@@ -76,8 +83,8 @@ export const headerTableSpec: DerivedTableSpec<Header> = {
         const match = rawPitch.match(/(\d+(?:\.\d+)?)\s*mm/)
         if (match) pitch = parseFloat(match[1])
       }
-      if (!pitch && desc.includes("2.54mm")) pitch = 2.54
-      if (!pitch && desc.includes("2.54")) pitch = 2.54
+      if (!pitch && searchableText.includes("2.54mm")) pitch = 2.54
+      if (!pitch && searchableText.includes("2.54")) pitch = 2.54
       if (!pitch) pitch = 2.54 // Default to standard 0.1" pitch
 
       // Parse number of pins and rows
@@ -100,7 +107,7 @@ export const headerTableSpec: DerivedTableSpec<Header> = {
 
       // If still no pins, try to extract from description
       if (!numPins) {
-        const match = desc.match(/(\d+)\s*p\b/i)
+        const match = searchableText.match(/(\d+)\s*p\b/i)
         if (match) numPins = parseInt(match[1])
       }
 
@@ -110,12 +117,22 @@ export const headerTableSpec: DerivedTableSpec<Header> = {
 
       // Determine gender
       let gender: "male" | "female" | "unknown" = "unknown"
-      if (desc.includes("female") || c.description.includes("Socket")) {
+      const rawGender = String(attrs["Gender"] ?? "").toLowerCase()
+      if (sourceSubcategory === "Female Headers") {
+        gender = "female"
+      } else if (sourceSubcategory === "Pin Headers") {
+        gender = "male"
+      } else if (
+        rawGender.includes("female") ||
+        searchableText.includes("female") ||
+        searchableText.includes("socket")
+      ) {
         gender = "female"
       } else if (
-        desc.includes("male") ||
-        desc.includes("pin header") ||
-        desc.includes("pin headers")
+        rawGender.includes("male") ||
+        searchableText.includes("male") ||
+        searchableText.includes("pin header") ||
+        searchableText.includes("pin headers")
       ) {
         gender = "male"
       }
@@ -175,18 +192,20 @@ export const headerTableSpec: DerivedTableSpec<Header> = {
       // Determine mounting style and angle
       const mountingStyle =
         attrs["Mounting Style"] || attrs["Mounting Type"] || null
+      const mountingStyleText = mountingStyle?.toLowerCase() ?? ""
       const isRightAngle = Boolean(
-        mountingStyle?.toLowerCase().includes("right") ||
-          mountingStyle?.toLowerCase().includes("angle") ||
-          desc.includes("right angle") ||
-          desc.includes("bend"),
+        mountingStyleText.includes("right") ||
+          mountingStyleText.includes("angle") ||
+          mountingStyleText.includes("bend") ||
+          searchableText.includes("right angle") ||
+          searchableText.includes("bend"),
       )
 
       // Determine if shrouded
       const isShrouded = Boolean(
-        mountingStyle?.toLowerCase().includes("shroud") ||
-          desc.includes("shroud") ||
-          desc.includes("box header"),
+        mountingStyleText.includes("shroud") ||
+          searchableText.includes("shroud") ||
+          searchableText.includes("box header"),
       )
 
       return {

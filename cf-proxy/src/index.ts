@@ -11,6 +11,8 @@ export interface Env {
   USE_D1: string
 }
 
+const CACHE_BUST_QUERY_PARAM = "cachebust"
+
 const extractSmallQuantityPrice = (price: string | null): string | number => {
   if (!price) return ""
   try {
@@ -129,13 +131,41 @@ const buildHealthResponse = (origin: string | null): Response => {
   })
 }
 
+const isCacheBustRequest = (url: URL): boolean => {
+  const value = url.searchParams.get(CACHE_BUST_QUERY_PARAM)?.toLowerCase()
+  return value === "1" || value === "true"
+}
+
+const stripInternalQueryParams = (url: URL): URL => {
+  const sanitizedUrl = new URL(url.toString())
+  sanitizedUrl.searchParams.delete(CACHE_BUST_QUERY_PARAM)
+  return sanitizedUrl
+}
+
+const withCacheBustHeaders = (
+  response: Response,
+  origin: string | null,
+): Response => {
+  const headers = new Headers(response.headers)
+  headers.set("cache-control", "no-store")
+  headers.set("x-cache-bust", "1")
+  addCorsHeaders(headers, origin)
+
+  return new Response(response.body, {
+    status: response.status,
+    headers,
+  })
+}
+
 export default {
   async fetch(
     request: Request,
     env: Env,
     ctx: ExecutionContext,
   ): Promise<Response> {
-    const url = new URL(request.url)
+    const requestUrl = new URL(request.url)
+    const url = stripInternalQueryParams(requestUrl)
+    const cacheBust = isCacheBustRequest(requestUrl)
     const origin = request.headers.get("origin")
 
     // Handle CORS preflight
@@ -163,7 +193,15 @@ export default {
 
     // Check if this is a JSON API request that can be handled by D1
     if (env.USE_D1 === "true") {
-      const d1Response = await tryD1Route(url, request, env, origin, ctx, cache)
+      const d1Response = await tryD1Route(
+        url,
+        request,
+        env,
+        origin,
+        ctx,
+        cache,
+        cacheBust,
+      )
       if (d1Response) {
         return d1Response
       }
@@ -197,7 +235,25 @@ async function handleCachedD1Response(
   ctx: ExecutionContext,
   cache: CacheService,
   producer: () => Promise<Response>,
+  options: {
+    cacheBust?: boolean
+  } = {},
 ): Promise<Response> {
+  if (options.cacheBust) {
+    await cache.delete(cacheUrl)
+
+    const response = await producer()
+    if (!response.ok) {
+      return withCacheBustHeaders(response, origin)
+    }
+
+    const entry = await cache.put(cacheUrl, response)
+    return cache.buildResponse(entry, "BUST", origin, {
+      noStore: true,
+      cacheBust: true,
+    })
+  }
+
   const cacheResult = await cache.get(cacheUrl)
 
   if (cacheResult.type === "fresh") {
@@ -230,10 +286,16 @@ async function tryD1Route(
   origin: string | null,
   ctx: ExecutionContext,
   cache: CacheService,
+  cacheBust = false,
 ): Promise<Response | null> {
   if (url.pathname === "/") {
-    return handleCachedD1Response(url, origin, ctx, cache, async () =>
-      handleD1HomePage(origin),
+    return handleCachedD1Response(
+      url,
+      origin,
+      ctx,
+      cache,
+      async () => handleD1HomePage(origin),
+      { cacheBust },
     )
   }
 
@@ -248,8 +310,13 @@ async function tryD1Route(
   const pathname = url.pathname.replace(/\.json$/, "")
 
   if (pathname === "/api/search") {
-    return handleCachedD1Response(url, origin, ctx, cache, async () =>
-      handleD1Search(url, env, origin),
+    return handleCachedD1Response(
+      url,
+      origin,
+      ctx,
+      cache,
+      async () => handleD1Search(url, env, origin),
+      { cacheBust },
     )
   }
 
@@ -260,6 +327,7 @@ async function tryD1Route(
       ctx,
       cache,
       async () => handleD1ComponentsList(url, isJsonRequest, env, origin),
+      { cacheBust },
     )
   }
 
@@ -280,6 +348,7 @@ async function tryD1Route(
     ctx,
     cache,
     async () => handleD1TableRoute(pathname, url, isJsonRequest, env, origin),
+    { cacheBust },
   )
 }
 

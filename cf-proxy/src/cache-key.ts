@@ -1,3 +1,5 @@
+const CACHE_CONTROL_QUERY_PARAMS = new Set(["cachebust"])
+
 /**
  * Generates a cache key from a URL by hashing the normalized path and sorted query params.
  */
@@ -29,6 +31,7 @@ export function normalizeUrl(url: URL): string {
   // Use Set to deduplicate keys since keys() returns duplicates for multi-value params
   const keys = Array.from(new Set(params.keys())).sort()
   for (const key of keys) {
+    if (CACHE_CONTROL_QUERY_PARAMS.has(key)) continue
     const values = params.getAll(key).sort()
     for (const value of values) {
       sortedParams.append(key, value)
