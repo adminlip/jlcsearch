@@ -1,6 +1,7 @@
 import { sql } from "kysely"
 import { Table } from "lib/ui/Table"
 import { ExpressionBuilder } from "kysely"
+import { buildSearchTokenGroups } from "lib/util/search-token-groups"
 import { withWinterSpec } from "lib/with-winter-spec"
 import { z } from "zod"
 
@@ -60,18 +61,35 @@ export default withWinterSpec({
   }
 
   if (req.query.search) {
-    const search = req.query.search // TypeScript now knows this is defined within this block
-    const searchPattern = `%${search}%`
-    query = query.where((eb) =>
-      eb("description", "like", searchPattern)
-        .or("mfr", "like", searchPattern)
-        // For lcsc, we'll search it as a number if it's numeric, otherwise skip it
-        .or(
-          search.match(/^\d+$/)
-            ? eb("lcsc", "=", parseInt(search))
-            : eb("description", "like", searchPattern), // Fallback to description if not numeric
-        ),
-    )
+    const search = req.query.search
+
+    if (search.match(/^\d+$/)) {
+      query = query.where("lcsc", "=", parseInt(search))
+    } else {
+      const tokenGroups = buildSearchTokenGroups(search)
+      const searchTokenGroups =
+        tokenGroups.length > 0 ? tokenGroups : [[search.toLowerCase()]]
+      const filteredTokenGroups = searchTokenGroups
+        .map((group) => group.filter((token) => token.length > 1))
+        .filter((group) => group.length > 0)
+      const likeTokenGroups =
+        filteredTokenGroups.length > 0 ? filteredTokenGroups : searchTokenGroups
+
+      for (const group of likeTokenGroups) {
+        const groupConditions = group.map((token) => {
+          const pattern = `%${token}%`
+          return sql<boolean>`(
+            LOWER(COALESCE(description, '')) LIKE ${pattern}
+            OR LOWER(COALESCE(mfr, '')) LIKE ${pattern}
+            OR LOWER(COALESCE(extra, '')) LIKE ${pattern}
+            OR LOWER(COALESCE(package, '')) LIKE ${pattern}
+          )`
+        })
+        query = query.where(
+          sql<boolean>`(${sql.join(groupConditions, sql` OR `)})`,
+        )
+      }
+    }
   }
 
   const fullComponents = await query.execute()

@@ -1,5 +1,7 @@
 import type { Kysely } from "kysely"
+import { sql } from "kysely"
 import type { DB } from "./db/types"
+import { buildSearchTokenGroups } from "./search-query"
 
 export interface ComponentCatalogQueryParams {
   subcategory_name?: string
@@ -52,13 +54,29 @@ export async function queryComponentCatalog(
 
   if (params.search) {
     const raw = params.search.trim()
-    const pattern = `%${raw.toLowerCase()}%`
+    const tokenGroups = buildSearchTokenGroups(raw)
+    const searchTokenGroups =
+      tokenGroups.length > 0 ? tokenGroups : [[raw.toLowerCase()]]
+    const filteredTokenGroups = searchTokenGroups
+      .map((group) => group.filter((token) => token.length > 1))
+      .filter((group) => group.length > 0)
+    const likeTokenGroups =
+      filteredTokenGroups.length > 0 ? filteredTokenGroups : searchTokenGroups
 
-    query = query.where((eb) =>
-      eb("description", "like", pattern)
-        .or("mfr", "like", pattern)
-        .or("package", "like", pattern),
-    )
+    for (const group of likeTokenGroups) {
+      const groupConditions = group.map((token) => {
+        const pattern = `%${token}%`
+        return sql<boolean>`(
+          LOWER(COALESCE(description, '')) LIKE ${pattern}
+          OR LOWER(COALESCE(mfr, '')) LIKE ${pattern}
+          OR LOWER(COALESCE(package, '')) LIKE ${pattern}
+          OR LOWER(COALESCE(extra, '')) LIKE ${pattern}
+        )`
+      })
+      query = query.where(
+        sql<boolean>`(${sql.join(groupConditions, sql` OR `)})`,
+      )
+    }
   }
 
   return await query.execute()

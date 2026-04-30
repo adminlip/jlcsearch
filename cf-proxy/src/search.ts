@@ -1,5 +1,6 @@
 import { sql, type Kysely, type RawBuilder } from "kysely"
 import type { DB } from "./db/types"
+import { buildSearchTokenGroups } from "./search-query"
 
 export interface SearchQueryParams {
   q?: string
@@ -20,9 +21,6 @@ interface SearchRow {
   basic: number | null
   preferred: number | null
 }
-
-const tokenizeSearchTerm = (term: string): string[] =>
-  term.toLowerCase().match(/[a-z0-9]+/g) ?? []
 
 const buildWhereClause = (conditions: RawBuilder<unknown>[]) =>
   conditions.length > 0 ? sql.join(conditions, sql` AND `) : sql`1 = 1`
@@ -56,18 +54,23 @@ export async function searchIndex(
         conditions.push(sql`lcsc = ${lcsc}`)
       }
     } else {
-      const tokens = tokenizeSearchTerm(raw)
-      const searchTokens = tokens.length > 0 ? tokens : [raw.toLowerCase()]
-      const filteredTokens = searchTokens.filter((token) => token.length > 1)
-      const likeTokens =
-        filteredTokens.length > 0 ? filteredTokens : searchTokens
+      const tokenGroups = buildSearchTokenGroups(raw)
+      const searchTokenGroups =
+        tokenGroups.length > 0 ? tokenGroups : [[raw.toLowerCase()]]
+      const filteredTokenGroups = searchTokenGroups
+        .map((group) => group.filter((token) => token.length > 1))
+        .filter((group) => group.length > 0)
+      const likeTokenGroups =
+        filteredTokenGroups.length > 0 ? filteredTokenGroups : searchTokenGroups
 
-      for (const token of likeTokens) {
+      for (const group of likeTokenGroups) {
         const alternatives = Array.from(
           new Set(
-            token.endsWith("mhz")
-              ? [token, token.replace(/mhz$/, "m")]
-              : [token],
+            group.flatMap((token) =>
+              token.endsWith("mhz")
+                ? [token, token.replace(/mhz$/, "m")]
+                : [token],
+            ),
           ),
         )
 
