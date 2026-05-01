@@ -6,7 +6,7 @@ describe("buildSearchTokenGroups", () => {
     expect(buildSearchTokenGroups("barrel jack")).toEqual([
       ["dc"],
       ["power"],
-      ["receptacle", "connector"],
+      ["receptacle"],
     ])
   })
 
@@ -14,7 +14,7 @@ describe("buildSearchTokenGroups", () => {
     expect(buildSearchTokenGroups("5v barrel jack")).toEqual([
       ["dc"],
       ["power"],
-      ["receptacle", "connector"],
+      ["receptacle"],
     ])
   })
 
@@ -24,7 +24,7 @@ describe("buildSearchTokenGroups", () => {
       ["1mm"],
       ["dc"],
       ["power"],
-      ["receptacle", "connector"],
+      ["receptacle"],
     ])
   })
 })

@@ -58,6 +58,6 @@ export const buildSearchTokenGroups = (term: string): SearchTokenGroup[] => {
     ...remainingTokens.map((token) => [token]),
     ["dc"],
     ["power"],
-    ["receptacle", "connector"],
+    ["receptacle"],
   ])
 }

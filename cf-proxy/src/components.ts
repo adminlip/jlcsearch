@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely"
+import type { Kysely, RawBuilder } from "kysely"
 import { sql } from "kysely"
 import type { DB } from "./db/types"
 import { buildSearchTokenGroups } from "./search-query"
@@ -9,6 +9,19 @@ export interface ComponentCatalogQueryParams {
   search?: string
   is_basic?: string
   is_preferred?: string
+}
+
+const buildSearchTextWhereClause = (
+  tokenGroups: string[][],
+): RawBuilder<unknown> => {
+  const groupConditions = tokenGroups.map((group) => {
+    const tokenConditions = group.map(
+      (token) => sql`search_text LIKE ${`%${token}%`}`,
+    )
+    return sql`(${sql.join(tokenConditions, sql` OR `)})`
+  })
+
+  return sql.join(groupConditions, sql` AND `)
 }
 
 export async function queryComponentCatalog(
@@ -63,20 +76,13 @@ export async function queryComponentCatalog(
     const likeTokenGroups =
       filteredTokenGroups.length > 0 ? filteredTokenGroups : searchTokenGroups
 
-    for (const group of likeTokenGroups) {
-      const groupConditions = group.map((token) => {
-        const pattern = `%${token}%`
-        return sql<boolean>`(
-          LOWER(COALESCE(description, '')) LIKE ${pattern}
-          OR LOWER(COALESCE(mfr, '')) LIKE ${pattern}
-          OR LOWER(COALESCE(package, '')) LIKE ${pattern}
-          OR LOWER(COALESCE(extra, '')) LIKE ${pattern}
-        )`
-      })
-      query = query.where(
-        sql<boolean>`(${sql.join(groupConditions, sql` OR `)})`,
-      )
-    }
+    query = query.where(
+      sql`lcsc`,
+      "in",
+      sql`(SELECT lcsc FROM search_index WHERE ${buildSearchTextWhereClause(
+        likeTokenGroups,
+      )})`,
+    )
   }
 
   return await query.execute()

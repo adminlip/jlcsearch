@@ -14,6 +14,17 @@ const extractSmallQuantityPrice = (price: string | null) => {
   }
 }
 
+const escapeFts5SearchTerm = (term: string): string => {
+  return `"${term.replace(/"/g, '""')}"`
+}
+
+const ftsGroupQuery = (group: string[]): string => {
+  const tokenQueries = group.map((token) => `${escapeFts5SearchTerm(token)}*`)
+  return tokenQueries.length === 1
+    ? tokenQueries[0]
+    : `(${tokenQueries.join(" OR ")})`
+}
+
 export default withWinterSpec({
   auth: "none",
   methods: ["GET"],
@@ -75,19 +86,19 @@ export default withWinterSpec({
       const likeTokenGroups =
         filteredTokenGroups.length > 0 ? filteredTokenGroups : searchTokenGroups
 
-      for (const group of likeTokenGroups) {
-        const groupConditions = group.map((token) => {
-          const pattern = `%${token}%`
-          return sql<boolean>`(
-            LOWER(COALESCE(description, '')) LIKE ${pattern}
-            OR LOWER(COALESCE(mfr, '')) LIKE ${pattern}
-            OR LOWER(COALESCE(extra, '')) LIKE ${pattern}
-            OR LOWER(COALESCE(package, '')) LIKE ${pattern}
-          )`
-        })
-        query = query.where(
-          sql<boolean>`(${sql.join(groupConditions, sql` OR `)})`,
-        )
+      query = query.where(
+        sql`lcsc`,
+        "in",
+        sql`(SELECT CAST(lcsc AS INTEGER) FROM components_fts WHERE components_fts MATCH ${likeTokenGroups
+          .map(ftsGroupQuery)
+          .join(" AND ")})`,
+      )
+
+      const packageTokens = buildSearchTokenGroups(search)
+        .flat()
+        .filter((token) => /^\d{4}$/.test(token))
+      if (packageTokens.length > 0) {
+        query = query.where("package", "in", packageTokens)
       }
     }
   }
