@@ -14,6 +14,7 @@ let BunSqliteDialectCtor: typeof BunSqliteDialect | undefined
 let bunSqliteImportError: unknown
 
 let dbClientSingleton: Kysely<DB> | undefined
+let dbClientSingletonPath: string | undefined
 
 if (process.env.WINTERSPEC_CODEGEN !== "true") {
   try {
@@ -58,8 +59,14 @@ export const getResolvedDbPath = (): string => {
 }
 
 export const getDbClient = () => {
+  const dbPath = getResolvedDbPath()
   if (dbClientSingleton) {
-    return dbClientSingleton
+    if (dbClientSingletonPath === dbPath) return dbClientSingleton
+
+    const staleDb = dbClientSingleton
+    dbClientSingleton = undefined
+    dbClientSingletonPath = undefined
+    void staleDb.destroy()
   }
 
   const Database = getDatabaseCtor()
@@ -76,9 +83,10 @@ export const getDbClient = () => {
 
   dbClientSingleton = new KyselyCtorRef<DB>({
     dialect: new BunSqliteDialectRef({
-      database: new Database(getResolvedDbPath()),
+      database: new Database(dbPath),
     }),
   })
+  dbClientSingletonPath = dbPath
 
   return dbClientSingleton
 }
@@ -88,6 +96,7 @@ export const destroyDbClient = async () => {
 
   const activeDb = dbClientSingleton
   dbClientSingleton = undefined
+  dbClientSingletonPath = undefined
   await activeDb.destroy()
 }
 
